@@ -131,7 +131,20 @@ class LLM:
         done_streaming = 0
 
         self._total_stats.requests += 1
-        response = await acompletion(**self._build_completion_args(messages), stream=True)
+
+        if self.config.model_name.startswith("antigravity/"):
+            from strix.llm.antigravity import AntigravityClient
+
+            # Strip images if model doesn't support vision?
+            # For now assume Antigravity supports whatever the underlying model supports.
+            # But we need to handle formatting in Client.
+            response = AntigravityClient().stream_generate_content(
+                model=self.config.model_name,
+                messages=messages,
+                temperature=0.7,  # Default or from config?
+            )
+        else:
+            response = await acompletion(**self._build_completion_args(messages), stream=True)
 
         async for chunk in response:
             chunks.append(chunk)
