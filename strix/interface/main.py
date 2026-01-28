@@ -308,7 +308,7 @@ Examples:
         "-t",
         "--target",
         type=str,
-        required=True,
+        required=False,
         action="append",
         help="Target to test (URL, repository, local directory path, domain name, or IP address). "
         "Can be specified multiple times for multi-target scans.",
@@ -373,6 +373,9 @@ Examples:
 
     if args.authenticate_antigravity:
         return args
+
+    if not args.target:
+        parser.error("the following arguments are required: -t/--target")
 
     if args.instruction and args.instruction_file:
         parser.error(
