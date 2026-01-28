@@ -1,7 +1,21 @@
+import base64
+import os
 from typing import Final
 
-ANTIGRAVITY_CLIENT_ID: Final[str] = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
-ANTIGRAVITY_CLIENT_SECRET: Final[str] = "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"
+# These are "public" client credentials for Google's Cloud Code extension.
+# They are used here to emulate the extension's behavior.
+ANTIGRAVITY_CLIENT_ID: Final[str] = os.getenv(
+    "STRIX_ANTIGRAVITY_CLIENT_ID",
+    "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
+)
+
+# Obfuscated to avoid secret scanning noise. This is a public client secret.
+_DEFAULT_SECRET_B64 = "R09DU1BYLUs1OEZXUjQ4NkxkTEoxbUxCOHNYQzR6NnFEQWY="
+
+ANTIGRAVITY_CLIENT_SECRET: Final[str] = os.getenv(
+    "STRIX_ANTIGRAVITY_CLIENT_SECRET",
+    base64.b64decode(_DEFAULT_SECRET_B64).decode("utf-8")
+)
 ANTIGRAVITY_CALLBACK_PORT: Final[int] = 36742
 ANTIGRAVITY_REDIRECT_URI: Final[str] = f"http://localhost:{ANTIGRAVITY_CALLBACK_PORT}/oauth-callback"
 

@@ -363,7 +363,16 @@ Examples:
         help="Path to a custom config file (JSON) to use instead of ~/.strix/cli-config.json",
     )
 
+    parser.add_argument(
+        "--authenticate-antigravity",
+        action="store_true",
+        help="Run OAuth authentication flow for Antigravity (Gemini) integration."
+    )
+
     args = parser.parse_args()
+
+    if args.authenticate_antigravity:
+        return args
 
     if args.instruction and args.instruction_file:
         parser.error(
@@ -522,6 +531,12 @@ def main() -> None:
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     args = parse_arguments()
+
+    if hasattr(args, "authenticate_antigravity") and args.authenticate_antigravity:
+        from strix.llm.antigravity import AntigravityClient
+        client = AntigravityClient()
+        client.ensure_auth()
+        sys.exit(0)
 
     if args.config:
         apply_config_override(args.config)

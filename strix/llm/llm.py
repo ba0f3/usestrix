@@ -74,6 +74,8 @@ class LLM:
         else:
             self._reasoning_effort = "high"
 
+        self._antigravity_client = None
+
     def _load_system_prompt(self, agent_name: str | None) -> str:
         if not agent_name:
             return ""
@@ -133,15 +135,36 @@ class LLM:
         self._total_stats.requests += 1
 
         if self.config.model_name.startswith("antigravity/"):
-            from strix.llm.antigravity import AntigravityClient
+            if not self._antigravity_client:
+                from strix.llm.antigravity import AntigravityClient
+                self._antigravity_client = AntigravityClient()
 
             # Strip images if model doesn't support vision?
             # For now assume Antigravity supports whatever the underlying model supports.
             # But we need to handle formatting in Client.
-            response = AntigravityClient().stream_generate_content(
+
+            # Extract basic params from config or defaults
+            # litellm usually handles this but we are bypassing it.
+            # We can try to use _build_completion_args to get the params but remove litellm specific ones.
+            # But _build_completion_args includes model and messages which we have.
+
+            # Simple approach: grab typical params
+            temperature = 0.7 # Default
+            max_tokens = 8192
+
+            # If we were using litellm args, we might have these in kwargs.
+            # Strix LLM config object doesn't have temperature/max_tokens fields directly exposed cleanly
+            # except via Config.get or defaults.
+            # However, litellm defaults are often used.
+            # Let's see if we can get them from config if set.
+
+            response = self._antigravity_client.stream_generate_content(
                 model=self.config.model_name,
                 messages=messages,
-                temperature=0.7,  # Default or from config?
+                temperature=temperature,
+                max_tokens=max_tokens,
+                # Pass reasoning effort if supported by Antigravity (Gemini/Claude thinking models)
+                # Client needs to handle it. For now, basic support.
             )
         else:
             response = await acompletion(**self._build_completion_args(messages), stream=True)
@@ -289,17 +312,38 @@ class LLM:
     def _is_anthropic(self) -> bool:
         if not self.config.model_name:
             return False
-        return any(p in self.config.model_name.lower() for p in ["anthropic/", "claude"])
+        model = self.config.model_name.lower()
+        if model.startswith("antigravity/"):
+            model = model.replace("antigravity/", "")
+        return any(p in model for p in ["anthropic/", "claude"])
 
     def _supports_vision(self) -> bool:
+        model = self.config.model_name
+        if model.startswith("antigravity/"):
+            # Assume gemini/claude models via antigravity support vision if they usually do
+            # For now let's just strip and ask litellm about the underlying model
+            model = model.replace("antigravity/", "")
+            # If it's just "gemini-3-flash", litellm might need provider prefix like "gemini/gemini-3-flash" or "vertex_ai/..."
+            # Antigravity usually maps to vertex_ai or google.
+            # Let's try adding google/ if missing? Or just return True for now for known models.
+            if "gemini" in model or "claude" in model:
+                return True
+            return False
+
         try:
-            return bool(supports_vision(model=self.config.model_name))
+            return bool(supports_vision(model=model))
         except Exception:  # noqa: BLE001
             return False
 
     def _supports_reasoning(self) -> bool:
+        model = self.config.model_name
+        if model.startswith("antigravity/"):
+            # Most Antigravity models are reasoning models (thinking)
+            # especially if they have 'thinking' in name or are Gemini 2.0+
+            return True
+
         try:
-            return bool(supports_reasoning(model=self.config.model_name))
+            return bool(supports_reasoning(model=model))
         except Exception:  # noqa: BLE001
             return False
 

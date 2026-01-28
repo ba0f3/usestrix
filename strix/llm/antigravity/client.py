@@ -5,7 +5,7 @@ import uuid
 from types import SimpleNamespace
 from typing import Any, AsyncGenerator, Optional
 
-import requests
+import httpx
 from rich.console import Console
 
 from strix.llm.antigravity.auth import AccountManager, authenticate_account
@@ -104,77 +104,62 @@ class AntigravityClient:
             }
 
             # Try endpoints
-            for endpoint in CODE_ASSIST_ENDPOINT_FALLBACKS:
-                url = f"{endpoint}/v1internal:streamGenerateContent?alt=sse"
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                for endpoint in CODE_ASSIST_ENDPOINT_FALLBACKS:
+                    url = f"{endpoint}/v1internal:streamGenerateContent?alt=sse"
 
-                try:
-                    # Execute blocking request in thread
-                    def make_request():
-                        return requests.post(
-                            url,
-                            headers=headers,
-                            json=wrapped_body,
-                            stream=True,
-                            timeout=60
-                        )
+                    try:
+                        async with client.stream("POST", url, headers=headers, json=wrapped_body) as response:
+                            if response.status_code == 429:
+                                retry_after = int(response.headers.get("Retry-After", 1))
+                                self.account_manager.mark_rate_limited(retry_after)
+                                last_error = f"Rate limit (429) on {endpoint}"
+                                break # Break inner loop to rotate account
 
-                    response = await asyncio.to_thread(make_request)
+                            if response.status_code >= 500:
+                                last_error = f"Server error ({response.status_code}) on {endpoint}"
+                                continue # Try next endpoint
 
-                    if response.status_code == 429:
-                        retry_after = int(response.headers.get("Retry-After", 1))
-                        self.account_manager.mark_rate_limited(retry_after)
-                        last_error = f"Rate limit (429) on {endpoint}"
-                        break # Break inner loop to rotate account
+                            response.raise_for_status()
 
-                    if response.status_code >= 500:
-                        last_error = f"Server error ({response.status_code}) on {endpoint}"
-                        continue # Try next endpoint
-
-                    response.raise_for_status()
-
-                    # Process stream
-                    # We iterate efficiently
-                    for line in response.iter_lines():
-                        if not line:
-                            continue
-                        line_text = line.decode("utf-8")
-                        if line_text.startswith("data:"):
-                            json_str = line_text[5:].strip()
-                            if not json_str:
-                                continue
-                            try:
-                                data = json.loads(json_str)
-                                actual_response = data.get("response", data)
-                                candidates = actual_response.get("candidates", [])
-                                if candidates:
-                                    content_part = candidates[0].get("content", {}).get("parts", [])
-                                    if content_part:
-                                        text = content_part[0].get("text", "")
-                                        if text:
-                                            # Format to mimic OpenAI/Litellm chunk using objects
-                                            yield SimpleNamespace(
-                                                choices=[
-                                                    SimpleNamespace(
-                                                        delta=SimpleNamespace(content=text),
-                                                        finish_reason=None
+                            async for line in response.aiter_lines():
+                                if not line:
+                                    continue
+                                if line.startswith("data:"):
+                                    json_str = line[5:].strip()
+                                    if not json_str:
+                                        continue
+                                    try:
+                                        data = json.loads(json_str)
+                                        actual_response = data.get("response", data)
+                                        candidates = actual_response.get("candidates", [])
+                                        if candidates:
+                                            content_part = candidates[0].get("content", {}).get("parts", [])
+                                            if content_part:
+                                                text = content_part[0].get("text", "")
+                                                if text:
+                                                    # Format to mimic OpenAI/Litellm chunk using objects
+                                                    yield SimpleNamespace(
+                                                        choices=[
+                                                            SimpleNamespace(
+                                                                delta=SimpleNamespace(content=text),
+                                                                finish_reason=None
+                                                            )
+                                                        ],
+                                                        usage=None
                                                     )
-                                                ],
-                                                usage=None
-                                            )
 
-                                    # Handle finish reason if present
-                                    finish_reason = candidates[0].get("finishReason")
-                                    if finish_reason:
-                                         # Yield a final chunk with finish reason?
-                                         # Litellm usually sends a chunk with finish_reason and empty content
-                                         pass
-                            except Exception:
-                                pass
-                    return
+                                            # Handle finish reason if present
+                                            finish_reason = candidates[0].get("finishReason")
+                                            if finish_reason:
+                                                 pass
+                                    except Exception:
+                                        pass
+                        return
 
-                except Exception as e:
-                    last_error = str(e)
-                    continue
+                    except Exception as e:
+                        last_error = str(e)
+                        continue
 
             # If we are here, we failed all endpoints for this account (or broke out due to 429)
             if last_error:
