@@ -36,6 +36,8 @@ from strix.interface.tool_components.user_message_renderer import UserMessageRen
 from strix.interface.utils import build_tui_stats_text
 from strix.llm.config import LLMConfig
 from strix.telemetry.tracer import Tracer, set_global_tracer
+from strix.llm.antigravity.auth import AccountManager
+import time
 
 
 def get_package_version() -> str:
@@ -1227,6 +1229,24 @@ class StrixTUIApp(App):  # type: ignore[misc]
         stats_text = build_tui_stats_text(self.tracer, self.agent_config)
         if stats_text:
             stats_content.append(stats_text)
+
+        # Fetch Antigravity quota status if applicable
+        try:
+            am = AccountManager()
+            # This loads from disk on every update, might be slightly inefficient but okay for TUI refresh rate
+            if am.accounts:
+                current_acc = am.get_current_account()
+                acc_idx = am.active_index + 1
+                total_acc = len(am.accounts)
+
+                # Check if current account is rate limited?
+                # AccountManager doesn't expose rate limit state directly in simple way
+                # except via 'lastUsed' or internal logic, but we can infer or just show active account.
+
+                # We can show "Account X/Y"
+                stats_content.append(f"\nAccount: {acc_idx}/{total_acc}", style="dim cyan")
+        except Exception:
+            pass
 
         version = get_package_version()
         stats_content.append(f"\nv{version}", style="white")
