@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from typing import Any, AsyncGenerator, Optional
 
 import httpx
+from litellm import ModelResponse
+from litellm.utils import Choices, Delta, Message, Usage
 from rich.console import Console
 
 from strix.llm.antigravity.auth import AccountManager, authenticate_account
@@ -138,21 +140,36 @@ class AntigravityClient:
                                             if content_part:
                                                 text = content_part[0].get("text", "")
                                                 if text:
-                                                    # Format to mimic OpenAI/Litellm chunk using objects
-                                                    yield SimpleNamespace(
+                                                    yield ModelResponse(
+                                                        id=f"chatcmpl-{uuid.uuid4()}",
+                                                        created=int(time.time()),
+                                                        model=model,
+                                                        object="chat.completion.chunk",
                                                         choices=[
-                                                            SimpleNamespace(
-                                                                delta=SimpleNamespace(content=text),
+                                                            Choices(
+                                                                index=0,
+                                                                delta=Delta(content=text, role="assistant"),
                                                                 finish_reason=None
                                                             )
                                                         ],
-                                                        usage=None
                                                     )
 
                                             # Handle finish reason if present
                                             finish_reason = candidates[0].get("finishReason")
                                             if finish_reason:
-                                                 pass
+                                                yield ModelResponse(
+                                                    id=f"chatcmpl-{uuid.uuid4()}",
+                                                    created=int(time.time()),
+                                                    model=model,
+                                                    object="chat.completion.chunk",
+                                                    choices=[
+                                                        Choices(
+                                                            index=0,
+                                                            delta=Delta(content=None, role=None),
+                                                            finish_reason="stop" # Simple mapping
+                                                        )
+                                                    ],
+                                                )
                                     except Exception:
                                         pass
                         return
