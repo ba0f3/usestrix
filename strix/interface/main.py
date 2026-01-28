@@ -217,19 +217,31 @@ async def warm_up_llm() -> None:
 
         llm_timeout = int(Config.get("llm_timeout") or "300")
 
-        completion_kwargs: dict[str, Any] = {
-            "model": model_name,
-            "messages": test_messages,
-            "timeout": llm_timeout,
-        }
-        if api_key:
-            completion_kwargs["api_key"] = api_key
-        if api_base:
-            completion_kwargs["api_base"] = api_base
+        if model_name.startswith("antigravity/"):
+            from strix.llm.antigravity import AntigravityClient
+            client = AntigravityClient()
+            # Perform a quick streaming generation to verify auth and connectivity
+            async for _ in client.stream_generate_content(
+                model=model_name,
+                messages=test_messages,
+                temperature=0.7,
+                max_tokens=10
+            ):
+                break
+        else:
+            completion_kwargs: dict[str, Any] = {
+                "model": model_name,
+                "messages": test_messages,
+                "timeout": llm_timeout,
+            }
+            if api_key:
+                completion_kwargs["api_key"] = api_key
+            if api_base:
+                completion_kwargs["api_base"] = api_base
 
-        response = litellm.completion(**completion_kwargs)
+            response = litellm.completion(**completion_kwargs)
 
-        validate_llm_response(response)
+            validate_llm_response(response)
 
     except Exception as e:  # noqa: BLE001
         error_text = Text()
@@ -308,7 +320,7 @@ Examples:
         "-t",
         "--target",
         type=str,
-        required=True,
+        required=False,
         action="append",
         help="Target to test (URL, repository, local directory path, domain name, or IP address). "
         "Can be specified multiple times for multi-target scans.",
@@ -363,7 +375,19 @@ Examples:
         help="Path to a custom config file (JSON) to use instead of ~/.strix/cli-config.json",
     )
 
+    parser.add_argument(
+        "--authenticate-antigravity",
+        action="store_true",
+        help="Run OAuth authentication flow for Antigravity (Gemini) integration."
+    )
+
     args = parser.parse_args()
+
+    if args.authenticate_antigravity:
+        return args
+
+    if not args.target:
+        parser.error("the following arguments are required: -t/--target")
 
     if args.instruction and args.instruction_file:
         parser.error(
@@ -522,6 +546,12 @@ def main() -> None:
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     args = parse_arguments()
+
+    if hasattr(args, "authenticate_antigravity") and args.authenticate_antigravity:
+        from strix.llm.antigravity import AntigravityClient
+        client = AntigravityClient()
+        client.ensure_auth()
+        sys.exit(0)
 
     if args.config:
         apply_config_override(args.config)
