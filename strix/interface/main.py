@@ -217,19 +217,31 @@ async def warm_up_llm() -> None:
 
         llm_timeout = int(Config.get("llm_timeout") or "300")
 
-        completion_kwargs: dict[str, Any] = {
-            "model": model_name,
-            "messages": test_messages,
-            "timeout": llm_timeout,
-        }
-        if api_key:
-            completion_kwargs["api_key"] = api_key
-        if api_base:
-            completion_kwargs["api_base"] = api_base
+        if model_name.startswith("antigravity/"):
+            from strix.llm.antigravity import AntigravityClient
+            client = AntigravityClient()
+            # Perform a quick streaming generation to verify auth and connectivity
+            async for _ in client.stream_generate_content(
+                model=model_name,
+                messages=test_messages,
+                temperature=0.7,
+                max_tokens=10
+            ):
+                break
+        else:
+            completion_kwargs: dict[str, Any] = {
+                "model": model_name,
+                "messages": test_messages,
+                "timeout": llm_timeout,
+            }
+            if api_key:
+                completion_kwargs["api_key"] = api_key
+            if api_base:
+                completion_kwargs["api_base"] = api_base
 
-        response = litellm.completion(**completion_kwargs)
+            response = litellm.completion(**completion_kwargs)
 
-        validate_llm_response(response)
+            validate_llm_response(response)
 
     except Exception as e:  # noqa: BLE001
         error_text = Text()
